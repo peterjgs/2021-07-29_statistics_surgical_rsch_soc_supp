@@ -1,0 +1,1151 @@
+---
+title: "Harris, Acquisition of surgical skills"
+author: "Peter Geelan-Small"
+date: "26th July, 2021"
+output: html_notebook
+---
+
+
+```{r message = F, warning = F}
+
+library(tidyverse)
+library(RcmdrMisc)
+library(emmeans)
+library(effects)
+library(statmod)
+library(sjPlot)
+
+```
+
+
+
+```{r}
+
+surg <- read.csv("harris acquisition surgical skills 2017.csv")
+
+str(surg)
+
+```
+
+Recode "Condition" with names of groups.
+
+```{r}
+
+surg <-
+    surg %>%
+    mutate(Condition2 = ifelse(Condition == 1, "Novice", 
+        ifelse(Condition == 2, "Expert", 
+            ifelse(Condition == 3, "Mixed", "Control"
+            )
+        )
+    )
+    )
+    
+surg
+
+```
+
+
+
+
+# Mean jerk by trial and group
+
+Make appropriate data set
+
+First analysis had Condition consisting o baseline, post-intervention and retention. It might be better to use baseline as a predictor, as there was no training done at baseline. The second lot of analyses are done in this way. No data values have been excluded.
+
+
+
+```{r}
+
+jerk_mean1 <- 
+    surg %>%
+    select(Participant, MeanJerk1, MeanJerk2, MeanJerk3) %>%
+    pivot_longer(!Participant, names_to = "Trial", 
+    values_to = "MeanJerk")
+
+#head(jerk_mean1) 
+
+jerk_mean1 <- 
+    jerk_mean1 %>%
+    mutate(Trial2 = ifelse(Trial == "MeanJerk1", "Baseline",
+                           ifelse(Trial == "MeanJerk2", "Post", 
+                                  "Retention")))
+
+#head(jerk_mean1) 
+
+## Add "Condition2"
+
+condit3 <- rep(surg$Condition2, each = 3)
+
+jerk_mean2 <- data.frame(jerk_mean1, Condition2 = condit3)
+
+#jerk_mean2[1:30, ]
+
+jerk_mean2$Participant <- factor(jerk_mean2$Participant)
+
+jerk_mean2$Trial2 <- factor(jerk_mean2$Trial2)
+
+jerk_mean2$Condition2 <- factor(
+    jerk_mean2$Condition2, 
+    levels = c("Novice", "Expert", "Mixed", "Control"))
+
+rm(jerk_mean1)
+    
+```
+
+
+
+```{r}
+
+summary(jerk_mean2)
+
+```
+
+
+```{r}
+
+ggplot(jerk_mean2, aes(x = "", y = MeanJerk)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+
+```
+
+
+```{r}
+
+ggplot(jerk_mean2, aes(x = Trial2, y = MeanJerk)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+    
+```
+
+
+
+```{r}
+
+ggplot(jerk_mean2, aes(x = Condition2, y = MeanJerk)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+ 
+```
+
+
+
+```{r}
+
+jerk_mean2 <- 
+    jerk_mean2 %>%
+    mutate(logMeanJerk = log(MeanJerk))
+
+```
+
+
+
+```{r eval = F}
+
+tapply(jerk_mean2$MeanJerk, INDEX = jerk_mean2$Trial2, sd, na.rm = T)
+
+```
+
+
+
+```{r eval = F}
+
+jerk_mean2$TrialCond <- interaction(jerk_mean2$Trial2, 
+                                    jerk_mean2$Condition2, 
+                                    sep = "_")
+
+ggplot(jerk_mean2, aes(x = TrialCond, y = logMeanJerk, colour = TrialCond)) +
+  geom_boxplot(outlier.shape = NA) +  # avoid plotting outliers twice
+  geom_point(alpha = 0.5, size = 1, position = position_jitterdodge()) +
+  labs(x = "Time-Condition", y = "Jerk (m/s^3)", colour = "TrialCond") +
+  #guides(fill = guide_legend(title = "Condition")) +
+  ggtitle("Mean jerk - log-transformed data") +
+  theme_classic() 
+
+```
+
+
+
+```{r}
+
+ggplot(jerk_mean2, aes(x = "", y = logMeanJerk)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+
+
+```
+
+
+
+
+
+
+```{r}
+
+jerk.lme1 <- lme(MeanJerk ~ Condition2 * Trial2, 
+                 random = ~ 1 | Participant,
+                 data = jerk_mean2,
+                 na.action = "na.omit")
+
+anova(jerk.lme1)
+
+```
+
+
+
+```{r}
+
+jerk.lme1a <- lme(MeanJerk ~ Trial2 * Condition2, 
+                 random = ~ 1 | Participant,
+                 data = jerk_mean2,
+                 na.action = "na.omit")
+
+anova(jerk.lme1a)
+
+```
+
+
+
+```{r}
+
+plot(jerk.lme1)  
+## Default is innermost level of grouping, 
+##   viz. not population level, but level "1"
+
+```
+
+
+
+```{r}
+
+plot(jerk.lme1, 
+     sqrt(abs(resid(., type = "p"))) ~ fitted(.), 
+     type = c("p", "smooth"))
+
+```
+
+
+
+```{r}
+
+## Need to use Pearson residuals calculated conditional on random 
+##   effects - see Pinheiro & Bates (i.e. level = 1 which is default)
+
+jerk.sres10 <-  residuals(jerk.lme1, level = 0, type = "pearson")
+
+jerk.sres11 <-  residuals(jerk.lme1, level = 1, type = "pearson")
+
+qqnorm(jerk.sres10)
+qqline(jerk.sres10)
+
+```
+
+The preferred residual type is plotted below.
+
+```{r}
+
+qqnorm(jerk.sres11)
+qqline(jerk.sres11)
+
+```
+
+
+
+
+```{r}
+
+jerk.lme2 <- lme(MeanJerk ~ Condition2 + Trial2, 
+                 random = ~ 1 | Participant,
+                 data = jerk_mean2,
+                 na.action = "na.omit")
+
+anova(jerk.lme2)
+
+```
+
+
+```{r}
+
+jerk_mean_emm1 <- emmeans(jerk.lme1, ~ Condition2 | Trial2)
+
+summary(jerk_mean_emm1)
+
+```
+
+
+```{r}
+
+jerk_mean_emm2 <- emmeans(jerk.lme2, pairwise ~ Trial2)
+
+summary(jerk_mean_emm2)
+
+```
+
+
+```{r}
+
+jerk_mean_emm1a <- emmeans(jerk.lme1, ~ Trial2 | Condition2)
+
+plot(jerk_mean_emm1a, horizontal = F)
+
+```
+
+
+
+```{r}
+
+plot(allEffects(jerk.lme1), lines = list(multiline = T), 
+     confint = list(style = "bars"))
+     
+```
+
+
+
+```{r}
+
+plot(predictorEffects(jerk.lme1, ~ Trial2), lines = list(multiline = T), 
+     confint = list(style = "bars"))
+
+```
+
+
+
+```{r}
+
+jerk.lme3 <- lme(logMeanJerk ~ Condition2 * Trial2, 
+                 random = ~ 1 | Participant,
+                 data = jerk_mean2,
+                 na.action = "na.omit")
+
+anova(jerk.lme3)
+
+```
+
+
+
+```{r}
+
+plot(jerk.lme3)
+
+```
+
+
+
+```{r}
+
+AIC(jerk.lme1); AIC(jerk.lme2) 
+
+```
+
+
+<br>
+
+## KT time & score
+
+
+```{r}
+
+surg$Gender <- factor(surg$Gender)
+
+surg$Condition2 <- factor(surg$Condition2)
+
+surg$Handedness <- factor(surg$Handedness)
+
+```
+
+
+```{r}
+
+ggplot(surg, aes(x = "", y = KTTime)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+
+
+```
+
+
+```{r}
+
+ggplot(surg, aes(x = Gender, y = KTTime)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+
+```
+
+
+
+```{r}
+
+ktt.lm1 <- lm(KTTime ~ Condition2 * Gender, 
+              data = surg)
+
+anova(ktt.lm1)
+
+```
+
+
+```{r}
+
+ktt.lm2 <- lm(KTTime ~ Condition2 + Gender, 
+              data = surg)
+
+anova(ktt.lm2)
+
+```
+
+
+```{r}
+
+summary(ktt.lm2)
+
+```
+
+
+```{r}
+
+ktt.emm2 <- emmeans(ktt.lm2, ~ Gender)
+
+summary(ktt.emm2)
+
+```
+
+
+```{r}
+
+plot(ktt.lm2, which = 1)
+
+```
+
+
+
+```{r}
+
+plot(ktt.lm2, which = 2)
+
+```
+
+
+
+```{r}
+
+surg$logKTTime <- log(surg$KTTime)
+
+ggplot(surg, aes(x = "", y = logKTTime)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+
+```
+
+
+
+```{r}
+
+ggplot(surg, aes(x = Gender, y = logKTTime)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+
+```
+
+
+
+```{r}
+
+ktt.lm3 <- lm(logKTTime ~ Condition2 + Gender , 
+              data = surg)
+
+anova(ktt.lm3)
+
+```
+
+
+<br>
+
+```{r}
+
+plot(ktt.lm3, which = 1)
+
+```
+
+
+
+```{r}
+
+plot(ktt.lm3, which = 2)
+
+```
+
+## KT score
+
+```{r}
+
+ggplot(surg, aes(x = "", y = KTscore)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0.1))
+
+
+```
+
+
+
+```{r}
+
+ggplot(surg, aes(x = Condition2, y = KTscore)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0.1))
+
+```
+
+
+
+```{r}
+
+kts.lm1 <- lm(KTscore ~ Condition2 * Gender, 
+              data = surg)
+
+anova(kts.lm1)
+
+```
+
+
+```{r}
+
+plot(kts.lm1, which = 1)
+
+```
+
+
+
+```{r}
+
+plot(kts.lm1, which = 2)
+
+```
+
+
+```{r}
+
+kts.lm2 <- lm(KTscore ~ Condition2 + Gender , 
+              data = surg)
+
+anova(kts.lm2)
+
+```
+
+
+```{r}
+
+plot(kts.lm2, which = 1)
+
+```
+
+
+
+```{r}
+
+plot(kts.lm2, which = 2)
+
+```
+
+
+
+
+```{r}
+
+summary(kts.lm2)
+
+```
+
+
+```{r}
+
+kts.emm2 <- emmeans(kts.lm2, pairwise ~ Gender)
+
+summary(kts.emm2)
+
+```
+
+
+```{r}
+
+confint(kts.emm2)$contrasts
+
+```
+
+
+```{r}
+
+contrast(kts.emm2, "eff")
+
+```
+
+
+
+```{r}
+
+pairs(kts.emm2)
+
+```
+
+
+
+```{r}
+
+kts.lm3 <- lm(KTscore ~ Condition2, data = surg)
+
+anova(kts.lm3)
+
+```
+
+
+```{r}
+
+res_fit_kts3 <- data.frame(res_kts3 = rstandard(kts.lm3),
+                           fit_kts3 = fitted(kts.lm3))
+
+ggplot(res_fit_kts3, aes(x = fit_kts3, y = res_kts3)) +
+  geom_jitter(width = 0.01, height = 0.01)
+
+#plot(kts.lm3, which = 1)
+
+```
+
+
+```{r}
+
+plot(kts.lm3, which = 2)
+
+```
+
+
+
+In original scoring scheme, max. score is 13 and acceptable score is 10. Make binary variable here pass/fail corresponding to this.
+
+
+
+```{r}
+
+numSummary(surg$KTscore)
+
+```
+
+
+```{r}
+
+surg$KTscore13 <- floor(surg$KTscore / 8 * 13)
+
+cbind(surg$KTscore, surg$KTscore13)
+
+surg <-
+  surg %>%
+  mutate(KTskill = ifelse(KTscore13 < 10, "Unsat", "Sat"))
+
+#cbind(surg$KTscore13, surg$KTskill)
+
+surg$KTskill <- factor(surg$KTskill)
+
+```
+
+
+
+```{r}
+
+KTscore_tbl <- with(surg, table(Condition2, KTskill))
+
+KTscore_tbl
+
+```
+
+
+```{r}
+
+KTscore_tbl_st <-
+  surg %>%
+  select(Condition2, KTskill) %>%
+  group_by(Condition2, KTskill) %>%
+  na.omit() %>%
+  summarise(n_obs = n())
+
+KTscore_tbl_st2 <- as.data.frame(KTscore_tbl)
+                                 
+surg %>%
+  filter(!is.na(KTskill) == T) %>% 
+  ggplot(., aes(Condition2)) +
+  geom_bar(aes(fill = KTskill))
+  
+```
+
+
+Above plot possibly not as useful as one below.
+
+
+```{r}
+
+cond_skill <- surg %>%
+  group_by(Condition2, KTskill) %>%
+  summarise(n_obs = n()) %>%
+  na.omit() 
+
+N <- sum(cond_skill$n_obs)
+
+ggplot(cond_skill, aes(x = Condition2, y = n_obs, fill = KTskill)) + 
+  geom_bar(position = "fill", stat = "identity") +
+#  scale_fill_manual(values = col.pal) +
+  labs(y = "Proportion")
+
+
+```
+
+
+```{r}
+
+chisq.test(KTscore_tbl, correct = F)
+
+```
+
+
+<br>
+
+## Errors per sec. and mean jerk at baseline
+
+
+```{r}
+
+ggplot(surg, aes(x = MeanJerk1, y = ERRORS.SEC_RT1)) +
+    geom_point()
+
+```
+
+
+
+```{r}
+
+ggplot(surg, aes(x = "", y = ERRORS.SEC_RT1)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0.1))
+
+```
+
+
+
+```{r}
+
+ggplot(surg, aes(x = "", y = MeanJerk1)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0.1))
+
+```
+
+
+Make data subset removing NAs from ERRORS.SEC_RT1, MeanJerk1, RT1Errors and RT1Time.
+
+```{r}
+
+surg_sub1 <-
+  surg %>%
+  select(ERRORS.SEC_RT1, MeanJerk1, RT1Errors, RT1Time) %>%
+  na.omit()
+
+numSummary(surg_sub1)
+
+```
+
+
+
+```{r}
+
+err.lm1 <- lm(ERRORS.SEC_RT1 ~ MeanJerk1, data = surg_sub1)
+
+anova(err.lm1)
+
+```
+
+
+
+```{r}
+
+summary(err.lm1)
+
+```
+
+
+
+```{r}
+
+plot(err.lm1, which = 1)
+
+```
+
+
+Not satisfactory!
+
+
+```{r}
+
+plot(rstandard(err.lm1) ~ fitted(err.lm1))
+abline(h = 0, lty = 3)
+     
+```
+
+
+
+```{r}
+
+plot(err.lm1, which = 2)
+
+```
+
+
+```{r}
+
+plot(err.lm1, which = 4)
+
+```
+
+Remove data points with std. resids > 3.
+
+
+```{r}
+
+surg_sub1$sres_err1 <- rstandard(err.lm1)
+
+surg_sub2 <-
+  surg_sub1 %>%
+  filter(sres_err1 < 3) 
+  
+dim(surg_sub2)
+
+```
+
+
+
+```{r}
+
+err.lm1a <- lm(ERRORS.SEC_RT1 ~ MeanJerk1, data = surg_sub2)
+
+summary(err.lm1a)
+
+```
+
+
+```{r}
+
+plot(rstandard(err.lm1a) ~ fitted(err.lm1a))
+abline(h = 0, lty = 3, col = "red")
+
+```
+
+
+
+```{r}
+
+plot(err.lm1a, which = 2)
+
+```
+
+
+
+```{r}
+
+plot(err.lm1a, which = 4)
+
+```
+
+<br>
+
+Try a log transformation of error rate
+
+```{r}
+
+surg_sub1$logERRORS.SEC_RT1 <- log(surg_sub1$ERRORS.SEC_RT1 )
+
+ggplot(surg_sub1, aes(x = "", y = logERRORS.SEC_RT1)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0.1))
+
+
+```
+
+
+
+
+```{r}
+
+err.lm2 <- lm(logERRORS.SEC_RT1 ~ MeanJerk1, data = surg_sub1)
+
+anova(err.lm2)
+
+```
+
+
+
+```{r}
+
+plot(err.lm2, which = 1)
+
+```
+
+
+
+```{r}
+
+plot(err.lm2, which = 2)
+
+```
+
+
+
+```{r}
+
+plot(err.lm1, which = 3)
+
+```
+
+
+```{r}
+
+newX <- seq(from = min(surg_sub1$MeanJerk1, na.rm = T),
+             to = max(surg_sub1$MeanJerk1, na.rm = T),
+             length = 100)
+
+newMJ <- data.frame(MeanJerk1 = newX)
+
+```
+
+
+
+
+```{r}
+
+err_RT1_pred1 <- predict(err.lm1, newdata = newMJ, interval = "confidence")
+
+yhat1 <- data.frame(err_RT1_pred1, MeanJerk = newMJ$MeanJerk1)
+
+```
+
+
+
+
+```{r}
+
+plot(fit ~ MeanJerk, data = yhat1, type = "l", ylim = c(0, 0.4),
+     ylab = "ERRORS.SEC_RT1")
+points(surg_sub1$MeanJerk1, surg_sub1$ERRORS.SEC_RT1)
+lines(yhat1$MeanJerk, yhat1$lwr, lty = 2)
+lines(yhat1$MeanJerk, yhat1$upr, lty = 2)
+
+```
+
+
+<br>
+
+
+```{r}
+
+summary(err.lm2)
+
+```
+
+
+
+```{r}
+
+confint(err.lm2)
+
+```
+
+
+
+```{r}
+
+err_RT1_pred2 <- predict(err.lm2, newdata = newMJ, interval = "confidence")
+
+err_RT1_pred_bt2 <- exp(err_RT1_pred2)
+
+yhat2 <- data.frame(err_RT1_pred2, MeanJerk = newMJ$MeanJerk1)
+
+yhat_bt2 <- data.frame(err_RT1_pred_bt2, MeanJerk = newMJ$MeanJerk1)
+
+```
+
+
+
+```{r}
+
+plot(fit ~ MeanJerk, data = yhat2, type = "l", ylim = c(-5, 0),
+     ylab = "logERRORS.SEC_RT1")
+points(surg_sub1$MeanJerk1, surg_sub1$logERRORS.SEC_RT1)
+
+```
+
+
+
+```{r}
+
+plot(fit ~ MeanJerk, data = yhat_bt2, type = "l", ylim = c(0, 0.4))
+points(surg_sub1$MeanJerk1, surg_sub1$ERRORS.SEC_RT1)
+
+```
+
+
+
+
+<br>
+
+
+Use Poisson GLM with number of errors as response and time to completion as offset.
+
+
+```{r}
+
+ggplot(surg_sub1, aes(x = MeanJerk1, y = RT1Errors)) +
+    geom_point()
+
+```
+
+
+
+```{r}
+
+err.glm1 <- glm(RT1Errors ~ MeanJerk1 + offset(log(RT1Time)),
+                family = poisson, data = surg_sub1)
+
+summary(err.glm1)
+
+```
+
+
+
+```{r}
+
+err.qres.p <- qresiduals(err.glm1)
+
+qqnorm(err.qres.p)
+abline(0, 1)
+
+```
+
+
+
+```{r}
+
+plot(qresiduals(err.glm1) ~ fitted(err.glm1))
+abline(h = 0)
+
+```
+
+
+
+```{r}
+
+#ref_grid(err.glm1)
+
+err.emm1 <- emmeans(err.glm1, "MeanJerk1", type = "response", offset = 0)
+
+summary(err.emm1)
+
+```
+
+
+<br>
+
+
+```{r}
+
+err.glm2 <- glm.nb(RT1Errors ~ MeanJerk1 + offset(log(RT1Time)),
+                   data = surg_sub1)
+
+summary(err.glm2)
+
+```
+
+
+
+```{r}
+
+err.qres.nb <- qresiduals(err.glm2)
+
+qqnorm(err.qres.nb)
+abline(0, 1)
+
+```
+
+
+
+```{r}
+
+plot(qresiduals(err.glm2) ~ fitted(err.glm2))
+abline(h = 0)
+
+```
+
+
+
+
+
+```{r}
+
+err.glm3 <- glm(RT1Errors ~ MeanJerk1 + offset(log(RT1Time)), 
+                family = quasipoisson,
+                data = surg_sub1)
+
+summary(err.glm3)
+
+```
+
+
+
+```{r}
+
+plot(err.glm3, which = 1)
+
+```
+
+
+
+```{r}
+
+plot(err.glm3, which = 2)
+
+```
+
+
+
+```{r}
+
+plot(err.glm3, which = 4)
+
+```
+
+
+
+```{r}
+
+AIC(err.glm1)
+
+AIC(err.glm2)
+
+```
+
+
+
+
+
+Save all data objects for convenience
+
+```{r}
+
+save(KTscore_tbl, KTscore_tbl_st, surg, surg_sub1, surg_sub2, 
+     file = "harris_data_obj.RData")
+
+```
+
+
+
+```{r}
+
+
+
+```
+

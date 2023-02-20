@@ -1,0 +1,578 @@
+---
+title: "Kinoshita, Postoperative delirium"
+author: "Peter Geelan-Small"
+date: "18th July, 2021"
+output: html_notebook
+---
+
+
+```{r message = F, warning = F}
+
+library(tidyverse)
+library(RcmdrMisc)
+library(rstatix)  ## dunn_test
+library(emmeans)
+library(effects)
+library(statmod)
+library(sjPlot)
+library(reshape2)
+library(nnet)
+
+```
+
+
+# Data
+
+```{r}
+
+pod <- read.csv("kinoshita postoperative delirium retrospective 2021.csv")
+
+str(pod)
+
+```
+
+
+Rename "Delirium...1....0", indicating absence (0) or presence (1) of post-op delirium "POD".
+
+
+```{r}
+
+pod <- 
+    pod %>%
+    rename(POD = Delirium...1....0)
+
+```
+
+
+
+```{r}
+
+ggplot(pod, aes(ICDSC)) +
+    geom_bar()
+
+```
+
+```{r}
+
+ggplot(pod, aes(x = "", y = NLR)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+
+```
+
+
+
+```{r}
+
+ggplot(pod, aes(x = NLR, y = ICDSC)) +
+    geom_point()
+
+```
+
+
+
+```{r}
+
+numSummary(pod$ICDSC)
+
+```
+
+
+
+```{r}
+
+table(pod$ICDSC)
+
+```
+
+
+
+```{r}
+
+numSummary(pod$NLR)
+           
+```
+
+
+
+```{r}
+
+icdsc.lm1 <- lm(ICDSC ~ NLR, data = pod)
+
+summary(icdsc.lm1)
+
+```
+
+
+
+```{r}
+
+#plot(icdsc.lm1, which = 1)
+
+plot(rstandard(icdsc.lm1) ~ fitted(icdsc.lm1))
+abline(h = 0, lty = 3, col = "red")
+
+```
+
+
+```{r}
+
+plot(icdsc.lm1, which = 2)
+
+```
+
+
+```{r}
+
+ggplot(pod, aes(x = NLR, y = ICDSC)) +
+  stat_summary(fun.data = mean_cl_normal) + 
+  geom_smooth(method = "lm", formula = y ~ x)
+
+```
+
+
+
+
+
+```{r}
+
+pod$ICDSC_f <- factor(pod$ICDSC)
+
+```
+
+
+
+```{r}
+
+ggplot(pod, aes(x = NLR, y = ICDSC_f)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+
+```
+
+
+```{r}
+
+pod$NLR_cat <- cut(pod$NLR, breaks = c(0:4, 11),
+                   labels = NULL)
+
+#cbind(pod$NLR, pod$NLR_cat)
+
+levels(pod$NLR_cat)
+
+```
+
+
+```{r}
+
+pod %>%
+  group_by(NLR_cat) %>%
+  count()
+
+```
+
+
+
+```{r}
+
+ggplot(pod, aes(x = NLR_cat, y = ICDSC)) +
+  geom_boxplot(outlier.shape = NA, width = 0.4) +  # avoid plotting outliers twice
+  geom_jitter(position = position_jitter(width = 0.1, height = 0))
+
+```
+
+
+```{r}
+
+kruskal.test(ICDSC ~ NLR_cat, data = pod)
+
+```
+
+
+
+```{r}
+
+dunn_test(ICDSC ~ NLR_cat, data = pod, detailed = T) 
+
+```
+
+## Ordinal logistic regression
+
+```{r}
+
+icdsc.olr <- polr(ICDSC_f ~ NLR, data = pod, Hess = T, method = "logistic")
+
+summary(icdsc.olr)
+
+```
+
+
+```{r}
+
+newX <- data.frame(NLR = seq(min(pod$NLR), max(pod$NLR), length.out = 100))
+
+pred_out_olr <- cbind(newX, predict(icdsc.olr, newX, type = "probs"))
+
+head(pred_out_olr)
+
+
+```
+
+
+```{r}
+
+pred_out_olr2 <- melt(pred_out_olr, id.vars = "NLR", variable.name = "ICDSC",
+                  value.name = "Probability")
+
+head(pred_out_olr2)
+
+```
+
+
+
+```{r}
+
+ggplot(pred_out_olr2, aes(x = NLR, y = Probability, colour = ICDSC)) +
+  geom_line() +
+  ggtitle("Ordinal logistic regression")
+
+
+```
+
+
+```{r}
+
+ggplot(pred_out_olr2, aes(x = NLR, y = Probability, colour = ICDSC)) +
+  geom_line() +
+  ggtitle("Ordinal logistic regression") +
+  facet_wrap(~ ICDSC)
+
+```
+
+
+## Multinomial logistic regression
+
+```{r}
+
+icdsc.mnom <- multinom(ICDSC_f ~ NLR, data = pod, Hess = T)
+
+summary(icdsc.mnom)
+
+```
+
+
+```{r}
+
+pred_out_mnom <- cbind(newX, predict(icdsc.mnom, newX, type = "probs"))
+
+head(pred_out_mnom)
+
+```
+
+
+```{r}
+
+pred_out_mnom2 <- melt(pred_out_mnom, id.vars = "NLR", variable.name = "ICDSC",
+                  value.name = "Probability")
+
+head(pred_out_mnom2)
+
+```
+
+
+```{r}
+
+ggplot(pred_out_mnom2, aes(x = NLR, y = Probability, colour = ICDSC)) +
+  geom_line() +
+  ggtitle("Multinomial logistic regression")
+
+```
+
+
+```{r}
+
+ggplot(pred_out_mnom2, aes(x = NLR, y = Probability, colour = ICDSC)) +
+  geom_line() +
+  ggtitle("Multinomial logistic regression") +
+  facet_wrap(~ ICDSC)
+
+```
+
+
+
+<br>
+
+
+Create a new variable NLR > 3.
+
+```{r}
+
+pod <- 
+    pod %>%
+    mutate(NLR_gt_3 = ifelse(NLR > 3, "gt_3", "le_3"))
+
+pod$NLR_gt_3 <- factor(pod$NLR_gt_3, levels = c("le_3", "gt_3"))
+
+```
+
+
+
+```{r eval = F}
+
+pod %>%
+    group_by(POD, NLR_gt_3) %>%
+    summarise(n_obs = n())
+
+```
+
+
+```{r}
+
+pod %>%
+    group_by(POD, NLR..3.0) %>%
+    summarise(n_obs = n())
+
+```
+
+
+
+```{r}
+
+pod$POD_f <- factor(pod$POD)
+
+#nlr.bin1 <- glm(POD ~ ACCI + NLR_gt_3, data = pod, 
+nlr.bin1 <- glm(POD ~ ACCI + NLR..3.0, data = pod, 
+                family = binomial)
+
+summary(nlr.bin1)
+
+```
+
+
+
+```{r}
+
+#nlr.emm1.NLR <- emmeans(nlr.bin1, pairwise ~ NLR_gt_3, 
+nlr.emm1.NLR <- emmeans(nlr.bin1, pairwise ~ NLR..3.0, 
+                        options = list(tran = "log"), type = "response")
+
+nlr.emm1.NLR
+
+```
+
+
+```{r}
+
+nlr.contr1 <- data.frame(confint(nlr.emm1.NLR$contrasts))
+
+nlr.or1 <- 1 / nlr.contr1$ratio
+
+nlr.or1.lb <- 1 / nlr.contr1$asymp.UCL
+
+nlr.or1.ub <- 1 / nlr.contr1$asymp.LCL
+
+nlr.or1
+
+nlr.or1.lb
+
+nlr.or1.ub
+
+```
+
+
+
+```{r}
+
+#nlr.bin2 <- glm(POD ~ NLR_gt_3 + ACCI..5 + E.PRE.DELIRIC, 
+nlr.bin2 <- glm(POD ~ NLR..3.0 + ACCI..5 + E.PRE.DELIRIC, 
+                data = pod, family = binomial)
+
+summary(nlr.bin2)
+
+```
+
+
+
+```{r}
+
+#nlr.emm2.NLR <- emmeans(nlr.bin2, pairwise ~ NLR_gt_3, 
+nlr.emm2.NLR <- emmeans(nlr.bin2, pairwise ~ NLR..3.0, 
+                        options = list(tran = "log"), type = "response")
+
+nlr.emm2.NLR
+
+```
+
+
+```{r}
+
+#summary(nlr.emm2)
+
+nlr.contr2 <- data.frame(confint(nlr.emm2.NLR$contrasts))
+
+nlr.or2 <- 1 / nlr.contr2$ratio
+
+nlr.or2.lb <- 1 / nlr.contr2$asymp.UCL
+
+nlr.or2.ub <- 1 / nlr.contr2$asymp.LCL
+
+nlr.or2
+
+nlr.or2.lb
+
+nlr.or2.ub
+
+```
+
+
+```{r eval = F}
+
+pod <- 
+  pod %>%
+  mutate(E.PRE.DELIRIC2 = ifelse(E.PRE.DELIRIC.score > 0.08, 1, 0))
+         
+```
+
+
+
+```{r eval = F}
+
+cbind(pod$E.PRE.DELIRIC, pod$E.PRE.DELIRIC2)
+
+```
+
+
+
+```{r eval = F}
+
+pod <- 
+  pod %>%
+  mutate(ACCI..5_2 = ifelse(ACCI > 5, 1, 0))
+         
+```
+
+
+
+```{r eval = F}
+
+nlr.bin2a <- glm(POD ~ NLR_gt_3 + ACCI..5_2 + E.PRE.DELIRIC2, 
+                 data = pod, family = binomial)
+
+summary(nlr.bin2a)
+
+```
+
+
+```{r eval = F}
+
+nlr.emm2a.NLR <- emmeans(nlr.bin2, pairwise ~ NLR_gt_3, 
+                         options = list(tran = "log"), type = "response")
+
+nlr.emm2a.NLR
+
+```
+
+
+
+```{r eval = F}
+
+
+#summary(nlr.emm2a)
+
+nlr.contr2a <- data.frame(confint(nlr.emm2a.NLR$contrasts))
+
+nlr.or2a <- 1 / nlr.contr2a$ratio
+
+nlr.or2a.lb <- 1 / nlr.contr2a$asymp.UCL
+
+nlr.or2a.ub <- 1 / nlr.contr2a$asymp.LCL
+
+nlr.or2a
+
+nlr.or2a.lb
+
+nlr.or2a.ub
+
+```
+
+
+
+```{r}
+
+pod.bin.full <- glm(POD ~ NLR..3.0 + ACCI..5 + E.PRE.DELIRIC + 
+                    fentanyl..0.38.µg.kg.hr. + BMI..21 + ASA3 +
+                    Blood.Out..230.g,
+                    data = pod, family = binomial)
+
+summary(pod.bin.full)
+
+```
+
+
+```{r}
+
+pod.full.emm.NLR <- emmeans(pod.bin.full, pairwise ~ NLR..3.0,
+                            options = list(tran = "log"), type = "response")
+
+pod.full.emm.NLR
+
+```
+
+
+```{r}
+
+
+nlr.contr.full <- data.frame(confint(pod.full.emm.NLR$contrasts))
+
+nlr.or.full <- 1 / nlr.contr.full $ratio
+
+nlr.or.full.lb <- 1 / nlr.contr.full$asymp.UCL
+
+nlr.or.full.ub <- 1 / nlr.contr.full$asymp.LCL
+
+nlr.or.full
+
+nlr.or.full.lb
+
+nlr.or.full.ub
+
+```
+
+
+```{r}
+
+pod.full.emm.E.P.D <- emmeans(pod.bin.full, 
+                              pairwise ~ E.PRE.DELIRIC,
+                              options = list(tran = "log"), type = "response")
+
+pod.full.emm.E.P.D
+
+```
+
+
+```{r}
+
+E.P.D.contr.full <- data.frame(confint(pod.full.emm.E.P.D$contrasts))
+
+E.P.D.or.full <- 1 / E.P.D.contr.full $ratio
+
+E.P.D.or.full.lb <- 1 / E.P.D.contr.full$asymp.UCL
+
+E.P.D.or.full.ub <- 1 / E.P.D.contr.full$asymp.LCL
+
+E.P.D.or.full
+
+E.P.D.or.full.lb
+
+E.P.D.or.full.ub
+
+```
+
+Save data objects for convenience.
+
+```{r}
+
+save(pod, file = "kinoshita_data_obj.RData")
+
+```
+
